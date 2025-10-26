@@ -52,48 +52,70 @@ function App() {
     setMessages(prev => [...prev, newMessage]);
   };
 
-  const handleWebSocketMessage = (data) => {
-    switch (data.type) {
-      case 'status':
-        addMessage('agent', data.message, 'status');
-        break;
-      case 'action':
-        addMessage('agent', `${data.action}: ${data.message}`, 'action');
-        break;
-      case 'result':
-        // Parse and format the result nicely
-        try {
-          const resultData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
-          if (resultData.products && Array.isArray(resultData.products)) {
-            // Format product results nicely
-            const formattedResult = resultData.products.slice(0, 5).map(product => 
-              `📱 ${product.name}\n💰 ${product.price}\n⭐ ${product.rating || 'N/A'}\n🔗 ${product.url || 'N/A'}`
-            ).join('\n\n');
-            addMessage('agent', `Found ${resultData.total_found || resultData.products.length} products:\n\n${formattedResult}`, 'result');
-          } else {
-            addMessage('agent', `Result: ${JSON.stringify(resultData, null, 2)}`, 'result');
-          }
-        } catch (e) {
-          addMessage('agent', `Result: ${data.data}`, 'result');
-        }
-        break;
-      case 'error':
-        addMessage('error', data.message, 'error');
-        break;
-      default:
-        addMessage('agent', data.message || 'Unknown message', 'message');
-    }
-  };
+         const handleWebSocketMessage = (data) => {
+           switch (data.type) {
+             case 'status':
+               addMessage('agent', data.message, 'status');
+               break;
+             case 'action':
+               addMessage('agent', `${data.action}: ${data.message}`, 'action');
+               break;
+             case 'result':
+               // Parse and format the result nicely
+               try {
+                 const resultData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
+                 const taskType = data.task_type || 'search';
+                 
+                 if (taskType === 'form_fill' && resultData.fields_filled) {
+                   // Format form results nicely
+                   const formattedResult = resultData.fields_filled.map(field => 
+                     `📝 ${field.field_name} (${field.field_type}): ${field.field_value}`
+                   ).join('\n');
+                   addMessage('agent', `✅ Form filled successfully!\n\n📋 Fields filled:\n${formattedResult}\n\n🌐 URL: ${resultData.form_url}\n📊 Status: ${resultData.submission_status}`, 'form-result');
+                 } else if (resultData.products && Array.isArray(resultData.products)) {
+                   // Format product results nicely
+                   const formattedResult = resultData.products.slice(0, 5).map(product => 
+                     `📱 ${product.name}\n💰 ${product.price}\n⭐ ${product.rating || 'N/A'}\n🔗 ${product.url || 'N/A'}`
+                   ).join('\n\n');
+                   addMessage('agent', `Found ${resultData.total_found || resultData.products.length} products:\n\n${formattedResult}`, 'result');
+                 } else {
+                   addMessage('agent', `Result: ${JSON.stringify(resultData, null, 2)}`, 'result');
+                 }
+               } catch (e) {
+                 addMessage('agent', `Result: ${data.data}`, 'result');
+               }
+               break;
+             case 'error':
+               addMessage('error', data.message, 'error');
+               break;
+             default:
+               addMessage('agent', data.message || 'Unknown message', 'message');
+           }
+         };
 
   const sendMessage = (e) => {
     e.preventDefault();
     if (!input.trim() || !ws || !isConnected) return;
 
+    // Detect task type based on keywords
+    const taskText = input.toLowerCase();
+    let taskType = 'search';
+    
+    if (taskText.includes('fill') || taskText.includes('form') || taskText.includes('submit') || 
+        taskText.includes('register') || taskText.includes('signup') || taskText.includes('login')) {
+      taskType = 'form_fill';
+    }
+
     // Add user message
     addMessage('user', input);
     
-    // Send to WebSocket
-    ws.send(JSON.stringify({ task: input }));
+    // Send task with type information
+    const taskData = {
+      task: input,
+      task_type: taskType
+    };
+    
+    ws.send(JSON.stringify(taskData));
     
     // Clear input
     setInput('');
@@ -144,14 +166,14 @@ function App() {
         <div className="input-container">
           <form onSubmit={sendMessage} className="input-form">
             <div className="input-wrapper">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Describe what you want the browser to do..."
-                disabled={!isConnected}
-                className="message-input"
-              />
+                     <input
+                       type="text"
+                       value={input}
+                       onChange={(e) => setInput(e.target.value)}
+                       placeholder="Try: 'Find laptops on Flipkart' or 'Fill contact form on example.com'"
+                       disabled={!isConnected}
+                       className="message-input"
+                     />
               <button 
                 type="submit" 
                 disabled={!isConnected || !input.trim()}

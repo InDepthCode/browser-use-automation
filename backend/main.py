@@ -34,8 +34,21 @@ class SearchResults(BaseModel):
     products: List[Product]
     total_found: int
 
+class FormField(BaseModel):
+    field_name: str
+    field_type: str  # text, email, password, select, checkbox, etc.
+    field_value: str
+    field_selector: Optional[str] = None
+
+class FormResult(BaseModel):
+    form_url: str
+    fields_filled: List[FormField]
+    submission_status: str  # success, failed, partial
+    message: str
+
 class TaskRequest(BaseModel):
     task: str
+    task_type: Optional[str] = "search"  # search, form_fill, general
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -76,8 +89,11 @@ async def run_scraping_task(request: TaskRequest):
         # Create browser instance
         browser = Browser()
         
-        # Create controller for structured output
-        controller = Controller(output_model=SearchResults)
+        # Determine output model based on task type
+        if request.task_type == "form_fill":
+            controller = Controller(output_model=FormResult)
+        else:
+            controller = Controller(output_model=SearchResults)
         
         # Create agent
         agent = Agent(
@@ -94,10 +110,59 @@ async def run_scraping_task(request: TaskRequest):
         # Process result
         final_result = result.final_result() if hasattr(result, 'final_result') else str(result)
         
-        return {"result": final_result, "status": "completed"}
+        return {"result": final_result, "status": "completed", "task_type": request.task_type}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Task failed: {str(e)}")
+
+@app.post("/fill-form")
+async def fill_form_task(request: TaskRequest):
+    """Specifically handle form filling tasks"""
+    try:
+        # Create browser instance
+        browser = Browser()
+        
+        # Create controller for form results
+        controller = Controller(output_model=FormResult)
+        
+        # Create agent with form-specific instructions
+        form_task = f"""
+        Fill out the form on the specified website with appropriate data.
+        Task: {request.task}
+        
+        Instructions:
+        1. Navigate to the form page
+        2. Identify all form fields
+        3. Fill each field with appropriate sample data
+        4. Submit the form if requested
+        5. Return details of what was filled
+        
+        Generate realistic sample data for each field type:
+        - Names: Use common names
+        - Emails: Use format like test@example.com
+        - Phone: Use format like +91-9876543210
+        - Address: Use sample addresses
+        - Passwords: Use format like TestPass123!
+        """
+        
+        agent = Agent(
+            task=form_task,
+            llm=llm,
+            browser=browser,
+            controller=controller
+        )
+        
+        # Run the task
+        result = await agent.run()
+        await browser.close()
+        
+        # Process result
+        final_result = result.final_result() if hasattr(result, 'final_result') else str(result)
+        
+        return {"result": final_result, "status": "completed", "task_type": "form_fill"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Form filling failed: {str(e)}")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -115,37 +180,71 @@ async def websocket_endpoint(websocket: WebSocket):
             }, websocket)
             
             # Process the task with live updates
-            await process_task_with_streaming(task_data["task"], websocket)
+            task_type = task_data.get("task_type", "search")
+            await process_task_with_streaming(task_data["task"], websocket, task_type)
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-async def process_task_with_streaming(task: str, websocket: WebSocket):
+async def process_task_with_streaming(task: str, websocket: WebSocket, task_type: str = "search"):
     """Process a task with real-time streaming updates"""
     try:
         # Send initial status
         await manager.send_personal_message({
             "type": "status",
-            "message": "Analyzing task...",
+            "message": f"Analyzing {task_type} task...",
             "timestamp": asyncio.get_event_loop().time()
         }, websocket)
         
-        # Create browser and agent
+        # Create browser instance
         browser = Browser()
-        controller = Controller(output_model=SearchResults)
         
+        # Determine output model and instructions based on task type
+        if task_type == "form_fill":
+            controller = Controller(output_model=FormResult)
+            enhanced_task = f"""
+            Fill out the form on the specified website with appropriate data.
+            Task: {task}
+            
+            Instructions:
+            1. Navigate to the form page
+            2. Identify all form fields
+            3. Fill each field with appropriate sample data
+            4. Submit the form if requested
+            5. Return details of what was filled
+            
+            Generate realistic sample data for each field type:
+            - Names: Use common names like John Smith, Sarah Johnson
+            - Emails: Use format like test@example.com
+            - Phone: Use format like +91-9876543210
+            - Address: Use sample addresses
+            - Passwords: Use format like TestPass123!
+            - Dates: Use current or future dates
+            """
+        else:
+            controller = Controller(output_model=SearchResults)
+            enhanced_task = task
+        
+        # Create agent
         agent = Agent(
-            task=task,
+            task=enhanced_task,
             llm=llm,
             browser=browser,
             controller=controller
         )
         
-        # Send navigation status
+        # Send status update based on task type
+        if task_type == "form_fill":
+            action_message = "Opening browser and navigating to form page..."
+            action_type = "navigate"
+        else:
+            action_message = "Opening browser and navigating to target site..."
+            action_type = "navigate"
+            
         await manager.send_personal_message({
             "type": "action",
-            "action": "navigate",
-            "message": "Opening browser and navigating to target site...",
+            "action": action_type,
+            "message": action_message,
             "timestamp": asyncio.get_event_loop().time()
         }, websocket)
         
@@ -154,20 +253,23 @@ async def process_task_with_streaming(task: str, websocket: WebSocket):
         await browser.close()
         
         # Send completion status
+        completion_message = "Extracting and processing results..." if task_type == "search" else "Processing form submission..."
         await manager.send_personal_message({
             "type": "action",
-            "action": "extract",
-            "message": "Extracting and processing results...",
+            "action": "extract" if task_type == "search" else "submit",
+            "message": completion_message,
             "timestamp": asyncio.get_event_loop().time()
         }, websocket)
         
         # Process and send final result
         final_result = result.final_result() if hasattr(result, 'final_result') else str(result)
         
+        success_message = "Task completed successfully!" if task_type == "search" else "Form filled successfully!"
         await manager.send_personal_message({
             "type": "result",
             "data": final_result,
-            "message": "Task completed successfully!",
+            "message": success_message,
+            "task_type": task_type,
             "timestamp": asyncio.get_event_loop().time()
         }, websocket)
         

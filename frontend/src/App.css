@@ -207,6 +207,16 @@
   white-space: pre-line;
 }
 
+.message-bubble.form-result {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fbbf24;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
 .message-bubble.error {
   background: #fef2f2;
   color: #dc2626;
