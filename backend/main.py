@@ -77,7 +77,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Initialize LLM
-llm = ChatOpenAI(model="gpt-4o", api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatOpenAI(model="gpt-5", api_key=os.getenv("OPENAI_API_KEY"))
 
 @app.get("/")
 async def root():
