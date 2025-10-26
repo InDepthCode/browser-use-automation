@@ -29,6 +29,7 @@ class Product(BaseModel):
     price: str
     rating: Optional[str] = None
     url: str
+    image: Optional[str] = None
 
 class SearchResults(BaseModel):
     products: List[Product]
@@ -223,7 +224,15 @@ async def process_task_with_streaming(task: str, websocket: WebSocket, task_type
             """
         else:
             controller = Controller(output_model=SearchResults)
-            enhanced_task = task
+            enhanced_task = f"""
+            {task}
+            
+            IMPORTANT INSTRUCTIONS:
+            1. For each product, extract the PRODUCT PAGE URL (click link/href) - not the image URL
+            2. Extract the product image URL (img src) separately for the image field
+            3. The 'url' field should be the link to view the full product on the website
+            4. The 'image' field should be the product image thumbnail URL
+            """
         
         # Create agent
         agent = Agent(
@@ -264,11 +273,18 @@ async def process_task_with_streaming(task: str, websocket: WebSocket, task_type
         # Process and send final result
         final_result = result.final_result() if hasattr(result, 'final_result') else str(result)
         
-        success_message = "Task completed successfully!" if task_type == "search" else "Form filled successfully!"
+        # Send completion notification
+        success_message = "✅ Task completed successfully!" if task_type == "search" else "✅ Form filled successfully!"
+        await manager.send_personal_message({
+            "type": "status",
+            "message": success_message,
+            "timestamp": asyncio.get_event_loop().time()
+        }, websocket)
+        
         await manager.send_personal_message({
             "type": "result",
             "data": final_result,
-            "message": success_message,
+            "message": "Here are the results:",
             "task_type": task_type,
             "timestamp": asyncio.get_event_loop().time()
         }, websocket)

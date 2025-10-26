@@ -47,51 +47,53 @@ function App() {
       role,
       content,
       type,
-      timestamp: new Date().toLocaleTimeString()
+      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
     };
     setMessages(prev => [...prev, newMessage]);
   };
 
-         const handleWebSocketMessage = (data) => {
-           switch (data.type) {
-             case 'status':
-               addMessage('agent', data.message, 'status');
-               break;
-             case 'action':
-               addMessage('agent', `${data.action}: ${data.message}`, 'action');
-               break;
-             case 'result':
-               // Parse and format the result nicely
-               try {
-                 const resultData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
-                 const taskType = data.task_type || 'search';
-                 
-                 if (taskType === 'form_fill' && resultData.fields_filled) {
-                   // Format form results nicely
-                   const formattedResult = resultData.fields_filled.map(field => 
-                     `📝 ${field.field_name} (${field.field_type}): ${field.field_value}`
-                   ).join('\n');
-                   addMessage('agent', `✅ Form filled successfully!\n\n📋 Fields filled:\n${formattedResult}\n\n🌐 URL: ${resultData.form_url}\n📊 Status: ${resultData.submission_status}`, 'form-result');
-                 } else if (resultData.products && Array.isArray(resultData.products)) {
-                   // Format product results nicely
-                   const formattedResult = resultData.products.slice(0, 5).map(product => 
-                     `📱 ${product.name}\n💰 ${product.price}\n⭐ ${product.rating || 'N/A'}\n🔗 ${product.url || 'N/A'}`
-                   ).join('\n\n');
-                   addMessage('agent', `Found ${resultData.total_found || resultData.products.length} products:\n\n${formattedResult}`, 'result');
-                 } else {
-                   addMessage('agent', `Result: ${JSON.stringify(resultData, null, 2)}`, 'result');
-                 }
-               } catch (e) {
-                 addMessage('agent', `Result: ${data.data}`, 'result');
-               }
-               break;
-             case 'error':
-               addMessage('error', data.message, 'error');
-               break;
-             default:
-               addMessage('agent', data.message || 'Unknown message', 'message');
-           }
-         };
+  const handleWebSocketMessage = (data) => {
+    switch (data.type) {
+      case 'status':
+        // Check if it's a completion message
+        const isCompletion = data.message && data.message.includes('✅');
+        addMessage('agent', data.message, isCompletion ? 'completion' : 'status');
+        break;
+      case 'action':
+        addMessage('agent', `${data.action}: ${data.message}`, 'action');
+        break;
+        case 'result':
+        // Parse and format the result nicely
+        try {
+          const resultData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
+          const taskType = data.task_type || 'search';
+          
+          if (taskType === 'form_fill' && resultData.fields_filled) {
+            // Format form results nicely
+            const formattedResult = resultData.fields_filled.map(field => 
+              `📝 ${field.field_name} (${field.field_type}): ${field.field_value}`
+            ).join('\n');
+            addMessage('agent', `✅ Form filled successfully!\n\n📋 Fields filled:\n${formattedResult}\n\n🌐 URL: ${resultData.form_url}\n📊 Status: ${resultData.submission_status}`, 'form-result');
+          } else if (resultData.products && Array.isArray(resultData.products)) {
+            // Store full product data for rendering with images
+            addMessage('agent', { 
+              products: resultData.products.slice(0, 5), 
+              total: resultData.total_found || resultData.products.length 
+            }, 'products');
+          } else {
+            addMessage('agent', `Result: ${JSON.stringify(resultData, null, 2)}`, 'result');
+          }
+        } catch (e) {
+          addMessage('agent', `Result: ${data.data}`, 'result');
+        }
+        break;
+      case 'error':
+        addMessage('error', data.message, 'error');
+        break;
+      default:
+        addMessage('agent', data.message || 'Unknown message', 'message');
+    }
+  };
 
   const sendMessage = (e) => {
     e.preventDefault();
@@ -121,6 +123,15 @@ function App() {
     setInput('');
   };
 
+  // Helper function to format URLs
+  const formatUrl = (url) => {
+    if (!url) return '#';
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    return 'https://' + url;
+  };
+
 
   return (
     <div className="app">
@@ -148,15 +159,43 @@ function App() {
                 {message.role === 'user' && (
                   <div className="message-avatar user-avatar">👤</div>
                 )}
-                <div className={`message-bubble ${message.type || 'default'}`}>
-                  <div className="message-content">
-                    {message.content}
-                  </div>
-                  <div className="message-time">{message.timestamp}</div>
-                </div>
                 {message.role === 'agent' && (
                   <div className="message-avatar agent-avatar">🤖</div>
                 )}
+                <div className={`message-bubble ${message.type || 'default'}`}>
+                  <div className="message-content">
+                    {message.type === 'products' && typeof message.content === 'object' ? (
+                      <div className="products-container">
+                        <div className="products-header">Found {message.content.total} products:</div>
+                        {message.content.products.map((product, idx) => (
+                          <div key={idx} className="product-card">
+                            {product.image && (
+                              <img 
+                                src={product.image.startsWith('http') ? product.image : `https://${product.image}`} 
+                                alt={product.name} 
+                                className="product-image" 
+                                onError={(e) => { e.target.style.display = 'none'; }} 
+                              />
+                            )}
+                            <div className="product-info">
+                              <div className="product-name">{product.name}</div>
+                              <div className="product-price">{product.price}</div>
+                              {product.rating && <div className="product-rating">⭐ {product.rating}</div>}
+                              {product.url && (
+                                <a href={formatUrl(product.url)} target="_blank" rel="noopener noreferrer" className="product-link">
+                                  View on Website →
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      message.content
+                    )}
+                  </div>
+                  <div className="message-time">{message.timestamp}</div>
+                </div>
               </div>
             ))}
             <div ref={messagesEndRef} />
