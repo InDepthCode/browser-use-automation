@@ -20,7 +20,6 @@ function App() {
     websocket.onopen = () => {
       setIsConnected(true);
       setWs(websocket);
-      addMessage('system', 'Connected to browser agent!');
     };
 
     websocket.onmessage = (event) => {
@@ -31,12 +30,10 @@ function App() {
     websocket.onclose = () => {
       setIsConnected(false);
       setWs(null);
-      addMessage('system', 'Disconnected from browser agent');
     };
 
     websocket.onerror = (error) => {
       console.error('WebSocket error:', error);
-      addMessage('error', 'Connection error occurred');
     };
 
     return () => {
@@ -64,7 +61,21 @@ function App() {
         addMessage('agent', `${data.action}: ${data.message}`, 'action');
         break;
       case 'result':
-        addMessage('agent', `Result: ${JSON.stringify(data.data, null, 2)}`, 'result');
+        // Parse and format the result nicely
+        try {
+          const resultData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
+          if (resultData.products && Array.isArray(resultData.products)) {
+            // Format product results nicely
+            const formattedResult = resultData.products.slice(0, 5).map(product => 
+              `📱 ${product.name}\n💰 ${product.price}\n⭐ ${product.rating || 'N/A'}\n🔗 ${product.url || 'N/A'}`
+            ).join('\n\n');
+            addMessage('agent', `Found ${resultData.total_found || resultData.products.length} products:\n\n${formattedResult}`, 'result');
+          } else {
+            addMessage('agent', `Result: ${JSON.stringify(resultData, null, 2)}`, 'result');
+          }
+        } catch (e) {
+          addMessage('agent', `Result: ${data.data}`, 'result');
+        }
         break;
       case 'error':
         addMessage('error', data.message, 'error');
@@ -88,72 +99,72 @@ function App() {
     setInput('');
   };
 
-  const exampleTasks = [
-    "Find MacBook Air 13-inch under ₹1,00,000 on Flipkart and give me top 3 with ratings",
-    "Search for 'Python programming books' on Amazon and extract the first 5 results",
-    "Go to GitHub trending repositories and get the top 3 trending Python projects",
-    "Find the latest iPhone models on Apple website with their prices"
-  ];
-
-  const handleExampleClick = (task) => {
-    setInput(task);
-  };
 
   return (
     <div className="app">
       <div className="chat-container">
         <div className="chat-header">
-          <h1>Browser Agent</h1>
-          <div className={`status ${isConnected ? 'connected' : 'disconnected'}`}>
-            {isConnected ? '●' : '○'}
+          <div className="header-content">
+            <div className="agent-info">
+              <div className="agent-avatar">🤖</div>
+              <div className="agent-details">
+                <h1>Browser Agent</h1>
+                <span className="agent-subtitle">AI-powered web automation</span>
+              </div>
+            </div>
+            <div className={`connection-indicator ${isConnected ? 'connected' : 'disconnected'}`}>
+              <div className="indicator-dot"></div>
+              <span>{isConnected ? 'Online' : 'Offline'}</span>
+            </div>
           </div>
         </div>
 
         <div className="chat-window">
-          {messages.length === 0 && (
-            <div className="welcome">
-              <p>Try these examples:</p>
-              {exampleTasks.slice(0, 2).map((task, index) => (
-                <button
-                  key={index}
-                  className="example"
-                  onClick={() => handleExampleClick(task)}
-                >
-                  {task}
-                </button>
-              ))}
-            </div>
-          )}
-          
-          {messages.map((message) => (
-            <div key={message.id} className={`message ${message.role}`}>
-              <div className="content">
-                {message.type === 'result' ? (
-                  <pre>{message.content}</pre>
-                ) : (
-                  message.content
+          <div className="messages-container">
+            {messages.map((message) => (
+              <div key={message.id} className={`message-wrapper ${message.role}`}>
+                {message.role === 'user' && (
+                  <div className="message-avatar user-avatar">👤</div>
+                )}
+                <div className={`message-bubble ${message.type || 'default'}`}>
+                  <div className="message-content">
+                    {message.content}
+                  </div>
+                  <div className="message-time">{message.timestamp}</div>
+                </div>
+                {message.role === 'agent' && (
+                  <div className="message-avatar agent-avatar">🤖</div>
                 )}
               </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
-        <form onSubmit={sendMessage} className="input-form">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Enter a task..."
-            disabled={!isConnected}
-          />
-          <button 
-            type="submit" 
-            disabled={!isConnected || !input.trim()}
-          >
-            Send
-          </button>
-        </form>
+        <div className="input-container">
+          <form onSubmit={sendMessage} className="input-form">
+            <div className="input-wrapper">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Describe what you want the browser to do..."
+                disabled={!isConnected}
+                className="message-input"
+              />
+              <button 
+                type="submit" 
+                disabled={!isConnected || !input.trim()}
+                className="send-button"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22,2 15,22 11,13 2,9"></polygon>
+                </svg>
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );
